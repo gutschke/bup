@@ -5,7 +5,7 @@ exec "$bup_python" "$0" ${1+"$@"}
 """
 # end of bup preamble
 
-import sys, os, errno
+import sys, os, errno, stat
 
 from bup import options, git, vfs, xstat
 from bup.helpers import log
@@ -60,17 +60,19 @@ def cache_get(top, path):
     
 
 class BupFs(fuse.Fuse):
-    def __init__(self, top, meta=False):
+    def __init__(self, top, meta=False, mode='', uid='', gid=''):
         fuse.Fuse.__init__(self)
         self.top = top
         self.meta = meta
+	self.mode = mode
+	self.uid = uid
+	self.gid = gid
     
     def getattr(self, path):
         log('--getattr(%r)\n' % path)
         try:
             node = cache_get(self.top, path)
             st = Stat()
-            st.st_mode = node.mode
             st.st_nlink = node.nlinks()
             st.st_size = node.size()  # Until/unless we store the size in m.
             if self.meta:
@@ -82,6 +84,21 @@ class BupFs(fuse.Fuse):
                     st.st_atime = max(0, xstat.fstime_floor_secs(m.atime))
                     st.st_mtime = max(0, xstat.fstime_floor_secs(m.mtime))
                     st.st_ctime = max(0, xstat.fstime_floor_secs(m.ctime))
+		    st.st_rdev = m.rdev
+		else:
+		    if self.mode:
+		        mask = stat.S_ISDIR(node.mode) and 0111
+			setmode = stat.S_ISLNK(node.mode) and 0777
+		        st.st_mode = (self.mode & (0666 | mask)) | \
+			             (node.mode & ~0777) | \
+			             setmode
+		    else:
+			st.st_mode = node.mode
+		    st.st_atime = node.atime
+		    st.st_mtime = node.mtime
+		    st.st_ctime = node.ctime
+		    st.st_uid = self.uid or 0
+		    st.st_gid = self.gid or 0
             return st
         except vfs.NoSuchFile:
             return -errno.ENOENT
@@ -124,12 +141,15 @@ fuse.fuse_python_api = (0, 2)
 
 
 optspec = """
-bup fuse [-d] [-f] <mountpoint>
+bup fuse [-d] [-f] [-o] [-m mode] [-u uid] [-g gid] [-r] <mountpoint>
 --
 d,debug   increase debug level
 f,foreground  run in foreground
 o,allow-other allow other users to access the filesystem
-meta          report original metadata for paths when available
+m,mode=       default file/directory permissions
+u,uid=        numeric default user id
+g,gid=        numeric default group id
+r,meta        report original metadata for paths when available
 """
 o = options.Options(optspec)
 (opt, flags, extra) = o.parse(sys.argv[1:])
@@ -139,7 +159,11 @@ if len(extra) != 1:
 
 git.check_repo_or_die()
 top = vfs.RefList(None)
-f = BupFs(top, meta=opt.meta)
+f = BupFs(top,
+          meta=opt.meta,
+          mode=opt.mode and int(opt.mode, 8),
+          uid=opt.uid and int(opt.uid),
+          gid=opt.gid and int(opt.gid))
 f.fuse_args.mountpoint = extra[0]
 if opt.debug:
     f.fuse_args.add('debug')
@@ -149,5 +173,7 @@ print f.multithreaded
 f.multithreaded = False
 if opt.allow_other:
     f.fuse_args.add('allow_other')
+    if opt.meta:
+	f.fuse_args.add('default_permissions')
 
 f.main()

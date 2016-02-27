@@ -39,7 +39,21 @@ should unmount it with `umount`(8).
 :   permit other users to access the filesystem. Necessary for
     exporting the filesystem via Samba, for example.
 
-\--meta
+-m, \--mode MODE
+:   set default permissions for files and directories. This
+    flag always applies to the top level directories, and
+    depending on whether full meta data is available, might
+    also apply to the rest of the file system.
+
+-u, \--uid USER
+:   set the default user id, if no other meta data is available.
+    The value must be specified numerically.
+
+-g, \--gid GROUP
+:   set the default group id, if no other meta data is available.
+    The value must be specified numerically.
+
+-r, \--meta
 :   report some of the original metadata (when available) for the
     mounted paths (currently the uid, gid, mode, and timestamps).
     Without this, only generic values will be presented.  This option
